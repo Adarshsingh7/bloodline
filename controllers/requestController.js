@@ -7,6 +7,9 @@ const requestPopulation = [
 	{ path: 'acceptedBy', select: 'name phone email bloodGroup' },
 ];
 
+const findRequestById = async (id) =>
+	BloodRequest.findById(id).populate(requestPopulation);
+
 // @desc    Create a new blood request
 // @route   POST /api/requests
 // @access  Private
@@ -15,7 +18,9 @@ const createRequest = asyncHandler(async (req, res) => {
 
 	if (!bloodGroup || !units || !hospital || longitude == null || latitude == null) {
 		res.status(400);
-		throw new Error('Please provide blood group, units, hospital, longitude and latitude');
+		throw new Error(
+			'Please provide blood group, units, hospital, longitude and latitude',
+		);
 	}
 
 	const request = new BloodRequest({
@@ -33,7 +38,8 @@ const createRequest = asyncHandler(async (req, res) => {
 	});
 
 	const createdRequest = await request.save();
-	res.status(201).json(createdRequest);
+	const populatedRequest = await findRequestById(createdRequest._id);
+	res.status(201).json(populatedRequest);
 });
 
 // @desc    Get all active blood requests for the map
@@ -41,7 +47,7 @@ const createRequest = asyncHandler(async (req, res) => {
 // @access  Private
 const getNearbyRequests = asyncHandler(async (req, res) => {
 	const requests = await BloodRequest.find({
-		status: 'pending',
+		status: { $in: ['pending', 'accepted'] },
 		'location.coordinates.0': { $exists: true, $ne: null },
 		'location.coordinates.1': { $exists: true, $ne: null },
 	})
@@ -62,16 +68,16 @@ const getMyRequests = asyncHandler(async (req, res) => {
 	res.json(requests);
 });
 
-// @desc    Get current user's completed donations
+// @desc    Get current user's donation activity
 // @route   GET /api/requests/my-donations
 // @access  Private
 const getMyDonations = asyncHandler(async (req, res) => {
 	const donations = await BloodRequest.find({
 		acceptedBy: req.user._id,
-		status: 'completed',
+		status: { $in: ['accepted', 'completed'] },
 	})
 		.populate(requestPopulation)
-		.sort({ completedAt: -1, updatedAt: -1 });
+		.sort({ acceptedAt: -1, completedAt: -1, updatedAt: -1 });
 
 	res.json(donations);
 });
@@ -80,17 +86,16 @@ const getMyDonations = asyncHandler(async (req, res) => {
 // @route   GET /api/requests/:id
 // @access  Private
 const getRequestById = asyncHandler(async (req, res) => {
-	console.log(req.params.id);
 	const request = await BloodRequest.findById(req.params.id)
 		.populate('patient', 'name phone email')
 		.populate('acceptedBy', 'name phone email');
 
-	if (request) {
-		res.json(request);
-	} else {
+	if (!request) {
 		res.status(404);
 		throw new Error('Request not found');
 	}
+
+	res.json(request);
 });
 
 // @desc    Accept a blood request
@@ -99,27 +104,60 @@ const getRequestById = asyncHandler(async (req, res) => {
 const acceptRequest = asyncHandler(async (req, res) => {
 	const request = await BloodRequest.findById(req.params.id);
 
-	if (request) {
-		if (request.status !== 'pending') {
-			res.status(400);
-			throw new Error('Request is already accepted or completed');
-		}
-
-		if (request.patient.toString() === req.user._id.toString()) {
-			res.status(400);
-			throw new Error('You cannot accept your own request');
-		}
-
-		request.status = 'accepted';
-		request.acceptedBy = req.user._id;
-		request.acceptedAt = new Date();
-
-		const updatedRequest = await request.save();
-		res.json(updatedRequest);
-	} else {
+	if (!request) {
 		res.status(404);
 		throw new Error('Request not found');
 	}
+
+	if (request.status !== 'pending') {
+		res.status(400);
+		throw new Error('Request is already accepted or completed');
+	}
+
+	if (request.patient.toString() === req.user._id.toString()) {
+		res.status(400);
+		throw new Error('You cannot accept your own request');
+	}
+
+	request.status = 'accepted';
+	request.acceptedBy = req.user._id;
+	request.acceptedAt = new Date();
+	request.completedAt = undefined;
+
+	await request.save();
+	const updatedRequest = await findRequestById(request._id);
+	res.json(updatedRequest);
+});
+
+// @desc    Cancel an accepted donor for a request
+// @route   POST /api/requests/:id/cancel
+// @access  Private
+const cancelAcceptedRequest = asyncHandler(async (req, res) => {
+	const request = await BloodRequest.findById(req.params.id);
+
+	if (!request) {
+		res.status(404);
+		throw new Error('Request not found');
+	}
+
+	if (request.patient.toString() !== req.user._id.toString()) {
+		res.status(401);
+		throw new Error('Only the patient can cancel this donor');
+	}
+
+	if (request.status !== 'accepted') {
+		res.status(400);
+		throw new Error('Only accepted requests can be cancelled');
+	}
+
+	request.status = 'pending';
+	request.acceptedBy = undefined;
+	request.acceptedAt = undefined;
+	request.completedAt = undefined;
+
+	await request.save();
+	const updatedRequest = await findRequestById(request._id);
+	res.json(updatedRequest);
 });
 
 // @desc    Complete a blood request
@@ -128,30 +166,34 @@ const acceptRequest = asyncHandler(async (req, res) => {
 const completeRequest = asyncHandler(async (req, res) => {
 	const request = await BloodRequest.findById(req.params.id);
 
-	if (request) {
-		if (request.patient.toString() !== req.user._id.toString()) {
-			res.status(401);
-			throw new Error(
-				'Not authorized. Only the patient can complete the request',
-			);
-		}
-
-		request.status = 'completed';
-		request.completedAt = new Date();
-
-		const updatedRequest = await request.save();
-
-		if (updatedRequest.acceptedBy) {
-			await User.findByIdAndUpdate(updatedRequest.acceptedBy, {
-				lastDonationDate: updatedRequest.completedAt,
-			});
-		}
-
-		res.json(updatedRequest);
-	} else {
+	if (!request) {
 		res.status(404);
 		throw new Error('Request not found');
 	}
+
+	if (request.patient.toString() !== req.user._id.toString()) {
+		res.status(401);
+		throw new Error(
+			'Not authorized. Only the patient can approve blood received',
+		);
+	}
+
+	if (request.status !== 'accepted' || !request.acceptedBy) {
+		res.status(400);
+		throw new Error('Only accepted requests can be approved');
+	}
+
+	request.status = 'completed';
+	request.completedAt = new Date();
+
+	await request.save();
+
+	await User.findByIdAndUpdate(request.acceptedBy, {
+		lastDonationDate: request.completedAt,
+	});
+
+	const updatedRequest = await findRequestById(request._id);
+	res.json(updatedRequest);
 });
 
 export {
@@ -161,5 +203,6 @@ export {
 	getMyDonations,
 	getRequestById,
 	acceptRequest,
+	cancelAcceptedRequest,
 	completeRequest,
 };
