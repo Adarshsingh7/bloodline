@@ -36,29 +36,14 @@ const createRequest = asyncHandler(async (req, res) => {
 	res.status(201).json(createdRequest);
 });
 
-// @desc    Get nearby blood requests
+// @desc    Get all active blood requests for the map
 // @route   GET /api/requests/nearby
 // @access  Private
 const getNearbyRequests = asyncHandler(async (req, res) => {
-	const { longitude, latitude, maxDistance = 50000 } = req.query; // maxDistance in meters (50km)
-
-	if (!longitude || !latitude) {
-		res.status(400);
-		throw new Error('Please provide longitude and latitude');
-	}
-
 	const requests = await BloodRequest.find({
 		status: 'pending',
-		patient: { $ne: req.user._id },
-		location: {
-			$near: {
-				$geometry: {
-					type: 'Point',
-					coordinates: [Number(longitude), Number(latitude)],
-				},
-				$maxDistance: Number(maxDistance),
-			},
-		},
+		'location.coordinates.0': { $exists: true, $ne: null },
+		'location.coordinates.1': { $exists: true, $ne: null },
 	})
 		.populate(requestPopulation)
 		.sort({ createdAt: -1 });
