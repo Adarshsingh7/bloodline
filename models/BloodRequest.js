@@ -25,6 +25,8 @@ const requestSchema = mongoose.Schema(
       default: "pending",
     },
     acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    acceptedAt: { type: Date },
+    completedAt: { type: Date },
   },
   {
     timestamps: true,
