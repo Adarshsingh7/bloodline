@@ -16,10 +16,10 @@ const findRequestById = async (id) =>
 const createRequest = asyncHandler(async (req, res) => {
 	const { bloodGroup, units, hospital, note, longitude, latitude } = req.body;
 
-	if (!bloodGroup || !units || !hospital || longitude == null || latitude == null) {
+	if (!bloodGroup || !hospital || longitude == null || latitude == null) {
 		res.status(400);
 		throw new Error(
-			'Please provide blood group, units, hospital, longitude and latitude',
+			'Please provide blood group, hospital, longitude and latitude',
 		);
 	}
 
@@ -27,7 +27,7 @@ const createRequest = asyncHandler(async (req, res) => {
 		patient: req.user._id,
 		patientName: req.user.name,
 		bloodGroup,
-		units,
+		units: Number(units) || 1,
 		hospital,
 		note,
 		location: {

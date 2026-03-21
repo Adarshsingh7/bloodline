@@ -5,7 +5,7 @@ const requestSchema = mongoose.Schema(
     patient: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "User" },
     patientName: { type: String, required: true },
     bloodGroup: { type: String, required: true },
-    units: { type: Number, required: true },
+    units: { type: Number, required: true, default: 1, min: 1 },
     hospital: { type: String, required: true },
     note: { type: String },
     location: {
